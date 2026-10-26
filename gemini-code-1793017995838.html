@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shared Finance AI Core — Eval & Release Gate Simulator (Built by Unmesh Karnekar in Claude Code)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'SFMono-Regular', 'monospace'],
+          },
+          colors: {
+            cron: {
+              bg: '#121211',
+              panel: '#191918',
+              elevated: '#21211F',
+              border: '#2B2B28',
+              borderSubtle: '#222220',
+              coral: '#FF5630',
+              emerald: '#10B981',
+              amber: '#F59E0B',
+              rose: '#F43F5E'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    .keycap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1;
+      border-radius: 4px;
+      border: 1px solid rgba(150, 150, 145, 0.28);
+      background: rgba(150, 150, 145, 0.08);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+    }
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(140, 140, 135, 0.25);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="bg-[#F7F6F3] dark:bg-cron-bg text-neutral-900 dark:text-[#EDEDEC] transition-colors duration-150">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useCallback } = React;
+
+    // ---------------------------------------------------------------------------
+    // 1. LUCANET'S 5 PUBLIC PRODUCT DOMAINS
+    // ---------------------------------------------------------------------------
+    const PRODUCT_DOMAINS = [
+      {
+        id: 'consolidation',
+        key: '1',
+        name: 'Consolidation',
+        short: 'CONS',
+        standards: 'IFRS 10 · IAS 21 · ASC 810',
+        suiteSize: 420,
+        equation: 'Assets − (Liabilities + Equity) = 0.00  ∧  ∑(IC_Receivable + IC_Payable) = 0.00',
+        scope: 'Multi-entity financial close, triangular intercompany profit elimination, NCI & cumulative translation adjustment (CTA).'
+      },
+      {
+        id: 'planning',
+        key: '2',
+        name: 'Financial Planning',
+        short: 'FP&A',
+        standards: '3-Statement Driver Logic',
+        suiteSize: 380,
+        equation: 'Cash_End(CF) − Cash_BS = 0.00  ∧  ARR_t = ARR_{t-1} + New + Exp − Churn',
+        scope: 'Integrated P&L, Balance Sheet, and Cash Flow rolling driver trees, working capital schedules, and PVM variance bridges.'
+      },
+      {
+        id: 'tax',
+        key: '3',
+        name: 'Tax Compliance',
+        short: 'TAX',
+        standards: 'IAS 12 · OECD Pillar Two · ASC 740',
+        suiteSize: 310,
+        equation: 'TopUpTax = max(0, 15% − CoveredTaxes / GloBE_Income) × (GloBE_Income − SBIE)',
+        scope: 'Book-to-tax reconciliation, DTA/DTL valuation allowance, and OECD Pillar Two 15% global minimum tax computation.'
+      },
+      {
+        id: 'esg',
+        key: '4',
+        name: 'ESG Reporting',
+        short: 'ESG',
+        standards: 'CSRD / ESRS E1 · GHG Protocol',
+        suiteSize: 295,
+        equation: 'tCO2e = ∑(Activity_i × VerifiedFactor_i × GWP_AR6)  ∧  UncitedFactors = 0',
+        scope: 'Scope 1, 2, and 3 GHG emissions factor mapping, double materiality scoring, and ESRS E1 XBRL sustainability tagging.'
+      },
+      {
+        id: 'cash',
+        key: '5',
+        name: 'Cash Management',
+        short: 'CASH',
+        standards: 'IAS 7 · ISO 20022 Liquidity',
+        suiteSize: 340,
+        equation: 'Cash_Close = Cash_Open + CF_Op + CF_Inv + CF_Fin + FX_Reval_IAS7.28',
+        scope: '13-week direct liquidity forecasting, ISO 20022 CAMT.053 bank reconciliation, and debt covenant headroom.'
+      }
+    ];
+
+    // ---------------------------------------------------------------------------
+    // 2. SHARED CORE CHANGE SCENARIOS
+    // ---------------------------------------------------------------------------
+    const SCENARIOS = [
+      {
+        id: 'modify_mcp_fx',
+        code: 'rc3',
+        title: 'Modify MCP tool schema for multi-currency consolidation',
+        shortTitle: 'Modify MCP Schema (Multi-Currency)',
+        category: 'Tooling & Type Safety',
+        latencyMs: 1455,
+        latencyDelta: '+35ms',
+        costDelta: '+$0.30 / 1k',
+        diffSnippet: 'fx_convert({ amount: Decimal128String, rate_basis: "CLOSING" | "AVG" | "HIST", ccy: ISO4217 })',
+        summary: 'Replaces IEEE-754 floats with string-encoded Decimal128 and enforces an explicit IAS 21 rate_basis enum on every currency call.',
+        domains: {
+          consolidation: {
+            t1: [
+              { id: 't1-balance', name: 'Double-Entry Balance Identity (∑Dr = ∑Cr)', pass: true, rate: 100.0, formula: '∑Debits − ∑Credits = €0.00', note: '420/420 journals balanced with zero sub-cent rounding drift across 4-tier subsidiary trees.' },
+              { id: 't1-fx', name: 'IAS 21 Rate-Type Enforcement (Closing vs Avg)', pass: true, rate: 100.0, formula: 'BS_Item → FX_Closing | P&L_Item → FX_Avg', note: 'Mandatory rate_basis enum prevents silent application of average rate to balance sheet accounts.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof amount === Decimal128String', note: 'Eliminates binary floating-point representation errors on high-volume FX conversions.' },
+              { id: 't1-cite', name: 'IFRS 10 / ASC 810 Citation URI Integrity', pass: true, rate: 100.0, formula: 'Citation_URI ∈ Verified_Standard_Corpus', note: '100% of cited paragraphs resolve to authentic IFRS 10 and IAS 21 clauses.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 99.6, base: 97.4, desc: 'Exact tie-out of consolidated trial balances, NCI schedules, and CTA reserves.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.9, base: 98.2, desc: 'Faithfulness to public IFRS 10 control and IAS 21 functional currency rules.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 98.4, base: 95.8, desc: 'Every elimination journal links back to originating intercompany invoice IDs.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 99.1, base: 96.5, desc: 'Single-pass tool execution without schema validation retries.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.2, base: 6.8, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Median seconds required for a group controller to verify an inline standard or ledger citation.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.1, base: 2.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Percentage of AI-proposed elimination journals edited by a human controller prior to posting.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.7, base: 1.5, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Percentage of runs abstaining or falling back to deterministic legacy rule execution.' }
+            ],
+            diagnosis: 'Eliminates cumulative translation adjustment (CTA) cent-rounding discrepancies across multi-currency sub-consolidations.'
+          },
+          planning: {
+            t1: [
+              { id: 't1-balance', name: '3-Statement Balance Sheet Plug Identity', pass: true, rate: 100.0, formula: 'Cash_CF_End == Cash_BS', note: '380/380 rolling forecast models reconcile balance sheet cash to cash flow statement.' },
+              { id: 't1-fx', name: 'Cohort & ARR Roll-Forward Conservation', pass: true, rate: 100.0, formula: 'ARR_t = ARR_{t-1} + New + Exp − Churn', note: 'Constant-currency ARR bridges tie out across 18-month horizons.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof driver_val === Decimal128String', note: 'Zero rounding drift in compound monthly growth driver expansions.' },
+              { id: 't1-cite', name: 'Variance Bridge Sign Consistency', pass: true, rate: 100.0, formula: 'ΔTotal = ΔPrice + ΔVolume + ΔMix + ΔFX', note: 'FX impact isolated cleanly from operational volume/price variance.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 98.2, base: 96.8, desc: 'Exact reconciliation of P&L, Balance Sheet, and Working Capital schedules.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.8, base: 97.5, desc: 'Adherence to public 3-statement financial modeling conventions.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 96.4, base: 94.9, desc: 'Full driver lineage from macro assumptions to line-item forecast.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 97.5, base: 96.1, desc: 'Clean tool invocation on multi-currency budget scenarios.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.8, base: 6.2, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Time for FP&A analyst to verify variance bridge driver citations.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.1, base: 2.9, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Percentage of AI forecast assumptions adjusted by FP&A leads.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.1, base: 1.4, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Percentage of scenario runs routed to legacy OLAP solver.' }
+            ],
+            diagnosis: 'Separates constant-currency budget variance from spot FX movement without manual plug adjustments.'
+          },
+          tax: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 12 Deferred Tax Movement Identity', pass: true, rate: 100.0, formula: 'ΔDTL − ΔDTA = Deferred_Tax_Expense', note: 'All temporary difference schedules reconcile across local and group currencies.' },
+              { id: 't1-fx', name: 'OECD Pillar Two 15% Minimum ETR Floor', pass: true, rate: 100.0, formula: 'TopUp% = max(0, 15% − GloBE_ETR)', note: 'EUR 750M threshold and constituent entity translations use verified rate basis.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof tax_base === Decimal128String', note: 'Strict decimal precision preserved across ETR Basis Point calculations.' },
+              { id: 't1-cite', name: 'Statutory & GloBE Citation Integrity', pass: true, rate: 100.0, formula: 'Article_Ref ∈ OECD_GloBE_Commentary', note: 'Zero fabricated statutory or OECD Model Rule references.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 97.4, base: 96.5, desc: 'Precision in GloBE ETR, SBIE carve-out, and QDMTT offset arithmetic.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.3, base: 97.1, desc: 'Strict compliance with IAS 12 and OECD Pillar Two Model Rules.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 96.0, base: 95.2, desc: 'Complete book-to-tax adjustment provenance.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.8, base: 95.9, desc: 'Accurate parameter selection on multi-jurisdictional tax calls.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 7.1, base: 7.5, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Time for tax director to verify statutory commentary citations.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.6, base: 3.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Percentage of AI tax provision schedules modified before filing.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.5, base: 1.8, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Percentage of tax computations escalated to deterministic engine.' }
+            ],
+            diagnosis: 'Translates foreign constituent entity GloBE income to Ultimate Parent Entity (UPE) presentation currency accurately.'
+          },
+          esg: {
+            t1: [
+              { id: 't1-balance', name: 'GHG Protocol Dimensional Unit Analysis', pass: true, rate: 100.0, formula: 'Activity_Unit × Factor_Unit → tCO2e', note: 'All energy and spend units convert cleanly to metric tonnes CO2e.' },
+              { id: 't1-fx', name: 'Zero Uncited Emission Factor Guardrail', pass: true, rate: 100.0, formula: 'Factor_ID ∈ {DEFRA, EPA, ecoinvent}', note: 'Every emission factor carries an immutable public registry ID.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof emission_qty === Decimal128String', note: 'Spend-based Scope 3 currency conversions use exact historical FX rates.' },
+              { id: 't1-cite', name: 'CSRD / ESRS E1 Paragraph Integrity', pass: true, rate: 100.0, formula: 'DR_Ref ∈ ESRS_E1_Taxonomy', note: '100% verified ESRS E1 disclosure requirement references.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 95.9, base: 95.2, desc: 'Spend-based Scope 3 Category 1 calculations benefit from exact FX conversion.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 94.8, base: 94.6, desc: 'Faithfulness to CSRD/ESRS E1 and GHG Protocol Corporate Standard.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 94.2, base: 93.8, desc: 'Lineage from invoice spend & kWh meter logs to XBRL tag.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 95.8, base: 95.4, desc: 'Proper invocation of unit & currency conversion tools.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 7.9, base: 8.1, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Time for sustainability auditor to verify emission factor table source. (Breaches 7.5s Strict Close SLA).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 3.1, base: 3.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Percentage of Scope 3 factor mappings overridden by ESG team. (Breaches 3.0% Strict Close SLA).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.9, base: 2.0, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Percentage of runs falling back to manual factor lookup.' }
+            ],
+            diagnosis: 'Passes Standard Policy across all tiers; under Year-End Strict Policy, ESG table retrieval remains slightly above the 7.5s audit time target.'
+          },
+          cash: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 7 Cash Roll-Forward Identity', pass: true, rate: 100.0, formula: 'Open + Op + Inv + Fin + FX = Close', note: 'Separates operating cash flows from IAS 7.28 unrealized FX effects.' },
+              { id: 't1-fx', name: 'Debt Covenant Ratio Arithmetic', pass: true, rate: 100.0, formula: 'NetDebt / LTM_EBITDA ≤ Covenant_Cap', note: 'Multi-currency credit facility headroom computed without float drift.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof camt053_amt === Decimal128String', note: 'ISO 20022 intraday sweep amounts preserved to exact minor units.' },
+              { id: 't1-cite', name: 'FX Spot vs Forward Bucket Alignment', pass: true, rate: 100.0, formula: 'Settlement_Date ∈ 13Wk_Bucket_i', note: 'All FX forward maturities mapped to exact weekly liquidity buckets.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 99.1, base: 97.6, desc: 'Exact reconciliation of multi-bank cash pooling and FX netting.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.5, base: 98.0, desc: 'Adherence to IAS 7 cash flow classification rules.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 97.6, base: 96.2, desc: 'Traceability from bank statement transaction to liquidity bucket.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 98.4, base: 97.0, desc: 'Zero malformed treasury tool invocations.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.1, base: 5.9, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Time for treasury manager to verify bank & covenant citations.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.4, base: 2.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Percentage of liquidity classifications manually edited.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.9, base: 1.2, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Percentage of cash forecast runs falling back to rule engine.' }
+            ],
+            diagnosis: 'Isolates IAS 7 paragraph 28 unrealized exchange rate effects on foreign cash balances with zero rounding drift.'
+          }
+        }
+      },
+      {
+        id: 'switch_base_model',
+        code: 'rc1',
+        title: 'Switch base model for lower latency',
+        shortTitle: 'Switch Base Model (Low Latency)',
+        category: 'Backbone Model Swap',
+        latencyMs: 610,
+        latencyDelta: '-810ms',
+        costDelta: '-$9.30 / 1k',
+        diffSnippet: 'model: "claude-sonnet-tier" → "distilled-fast-8b" | reasoning_budget: 4096 → 0',
+        summary: 'Replaces the primary reasoning model with a small low-latency model. Cuts p95 latency by 57%, but breaks multi-hop accounting invariants in Consolidation, FP&A, and Tax.',
+        domains: {
+          consolidation: {
+            t1: [
+              { id: 't1-balance', name: 'Double-Entry Balance Identity (∑Dr = ∑Cr)', pass: false, rate: 98.1, formula: '∑Debits − ∑Credits = €0.00', note: 'BREACH: 8 of 420 triangular intercompany inventory eliminations failed to balance by > €120.' },
+              { id: 't1-fx', name: 'IAS 21 Rate-Type Enforcement (Closing vs Avg)', pass: false, rate: 99.0, formula: 'BS_Item → FX_Closing | P&L_Item → FX_Avg', note: 'BREACH: 4 test cases translated foreign goodwill using period-average FX instead of closing rate.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof amount === Decimal128String', note: 'JSON tool syntax valid.' },
+              { id: 't1-cite', name: 'IFRS 10 / ASC 810 Citation URI Integrity', pass: false, rate: 99.5, formula: 'Citation_URI ∈ Verified_Standard_Corpus', note: 'BREACH: Hallucinated non-existent subparagraphs in IFRS 10.B86.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 86.4, base: 97.4, desc: 'Severe drop on multi-subsidiary step acquisitions and NCI share of profit.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 91.0, base: 98.2, desc: 'Confuses IAS 21 functional vs presentation currency translation rules.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 82.5, base: 95.8, desc: 'Omits intermediate elimination steps when reasoning tokens are disabled.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 88.2, base: 96.5, desc: 'Prematurely commits consolidation journal before querying minority interest.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 11.4, base: 6.8, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Controllers spend +4.6s hunting down vague paragraph citations.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 9.8, base: 2.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Nearly 1 in 10 consolidation journals require manual controller correction.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 6.4, base: 1.5, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Runtime symbolic balance guard rejects 6.4% of model outputs.' }
+            ],
+            diagnosis: 'HARD BLOCK: Smaller model skips intermediate elimination steps in 3-entity supply chains, leaving unrealized profit in consolidated inventory.'
+          },
+          planning: {
+            t1: [
+              { id: 't1-balance', name: '3-Statement Balance Sheet Plug Identity', pass: true, rate: 100.0, formula: 'Cash_CF_End == Cash_BS', note: 'Post-hook deterministic solver enforces cash plug.' },
+              { id: 't1-fx', name: 'Cohort & ARR Roll-Forward Conservation', pass: true, rate: 100.0, formula: 'ARR_t = ARR_{t-1} + New + Exp − Churn', note: 'Single-table ARR roll-forwards pass.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof driver_val === Decimal128String', note: 'Schema valid.' },
+              { id: 't1-cite', name: 'Variance Bridge Sign Consistency', pass: false, rate: 99.2, formula: 'ΔTotal = ΔPrice + ΔVolume + ΔMix + ΔFX', note: 'BREACH: 3 COGS mix-variance bridges inverted favorable/unfavorable sign conventions.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 91.2, base: 96.8, desc: 'Errors on multi-driver DSO/DPO working capital schedule linkages.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 94.0, base: 97.5, desc: 'Minor drift on non-GAAP EBITDA bridge adjustments.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 87.8, base: 94.9, desc: 'Skips formula explanation on compound variance bridges.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 90.5, base: 96.1, desc: 'Calls variance decomposition tool with inverted baseline period.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 8.4, base: 6.2, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Borderline audit time (8.4s); fails Strict Close gate.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 6.1, base: 2.9, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'BREACH: 6.1% override rate on working capital forecasts.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 3.9, base: 1.4, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'BREACH: 3.9% fallback rate.' }
+            ],
+            diagnosis: 'HARD BLOCK: Inverts favorable/unfavorable variance signs on cost accounts and breaches the 4.0% controller override ceiling.'
+          },
+          tax: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 12 Deferred Tax Movement Identity', pass: false, rate: 98.7, formula: 'ΔDTL − ΔDTA = Deferred_Tax_Expense', note: 'BREACH: 4 cases reversed DTA and DTL sign on unrealized FX losses.' },
+              { id: 't1-fx', name: 'OECD Pillar Two 15% Minimum ETR Floor', pass: false, rate: 97.4, formula: 'TopUp% = max(0, 15% − GloBE_ETR)', note: 'BREACH: 8 cases misapplied Qualified Domestic Minimum Top-Up Tax (QDMTT) credit.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof tax_base === Decimal128String', note: 'Schema valid.' },
+              { id: 't1-cite', name: 'Statutory & GloBE Citation Integrity', pass: false, rate: 99.0, formula: 'Article_Ref ∈ OECD_GloBE_Commentary', note: 'BREACH: 3 fabricated GloBE Article numbers.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 84.8, base: 96.5, desc: 'Fails multi-step Substance-Based Income Exclusion (SBIE) payroll/tangible asset carve-outs.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 89.5, base: 97.1, desc: 'Misinterprets IAS 12 initial recognition exemption.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 81.0, base: 95.2, desc: 'Incomplete statutory deduction hierarchy.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 86.7, base: 95.9, desc: 'Omits jurisdictional blending aggregation call.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 12.6, base: 7.5, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'BREACH: 12.6s audit verification time.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 11.2, base: 3.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'BREACH: 11.2% controller override rate.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 7.5, base: 1.8, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'BREACH: 7.5% fallback rate.' }
+            ],
+            diagnosis: 'HARD BLOCK: OECD Pillar Two jurisdictional blending requires a 5-step hierarchical deduction; the low-latency model truncates step 4.'
+          },
+          esg: {
+            t1: [
+              { id: 't1-balance', name: 'GHG Protocol Dimensional Unit Analysis', pass: true, rate: 100.0, formula: 'Activity_Unit × Factor_Unit → tCO2e', note: 'Handled by unit conversion tool.' },
+              { id: 't1-fx', name: 'Zero Uncited Emission Factor Guardrail', pass: true, rate: 100.0, formula: 'Factor_ID ∈ {DEFRA, EPA, ecoinvent}', note: '100% cited.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof emission_qty === Decimal128String', note: 'Schema valid.' },
+              { id: 't1-cite', name: 'CSRD / ESRS E1 Paragraph Integrity', pass: true, rate: 100.0, formula: 'DR_Ref ∈ ESRS_E1_Taxonomy', note: 'Verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 93.8, base: 95.2, desc: 'Drops below 94% on complex Scope 3 Category 15 financed emissions.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 93.5, base: 94.6, desc: 'Occasionally conflates location-based and market-based Scope 2 narrative.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 90.1, base: 93.8, desc: 'Abbreviated factor selection rationale.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 93.9, base: 95.4, desc: 'Valid tool calls.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 8.6, base: 8.1, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'BREACH: 8.6s exceeds 8.5s Standard SLA.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 4.2, base: 3.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'BREACH: 4.2% exceeds 4.0% Standard SLA.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 2.4, base: 2.0, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Within 2.5% Standard SLA; breaches 1.8% Strict SLA.' }
+            ],
+            diagnosis: 'HOLD / WARN: Passes Tier 1 hard invariants, but Tier 2 Golden Average (92.8%) and Tier 3 Override Rate (4.2%) breach release gates.'
+          },
+          cash: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 7 Cash Roll-Forward Identity', pass: true, rate: 100.0, formula: 'Open + Op + Inv + Fin + FX = Close', note: '100% balanced.' },
+              { id: 't1-fx', name: 'Debt Covenant Ratio Arithmetic', pass: true, rate: 100.0, formula: 'NetDebt / LTM_EBITDA ≤ Covenant_Cap', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof camt053_amt === Decimal128String', note: '100% valid.' },
+              { id: 't1-cite', name: 'FX Spot vs Forward Bucket Alignment', pass: true, rate: 100.0, formula: 'Settlement_Date ∈ 13Wk_Bucket_i', note: '100% aligned.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 95.8, base: 97.6, desc: 'Handles structured ISO 20022 CAMT.053 cash messages well.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 96.4, base: 98.0, desc: 'Accurate IAS 7 classification.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 93.5, base: 96.2, desc: 'Shorter explanation notes.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 95.1, base: 97.0, desc: 'Clean tool execution.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.1, base: 5.9, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Within SLA (6.1s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.8, base: 2.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Within SLA (2.8%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.7, base: 1.2, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Within SLA (1.7%).' }
+            ],
+            diagnosis: 'Cash Management passes Standard Policy at 610ms latency, but global shared core release is blocked by Consolidation, FP&A, and Tax.'
+          }
+        }
+      },
+      {
+        id: 'update_rag_esg',
+        code: 'rc2',
+        title: 'Update RAG chunking for ESG standards',
+        shortTitle: 'Update RAG Chunking (ESG Tables)',
+        category: 'Retrieval & Grounding Pipeline',
+        latencyMs: 1340,
+        latencyDelta: '-80ms',
+        costDelta: '-$0.60 / 1k',
+        diffSnippet: 'chunk_strategy: "fixed_512_tokens" → "table_row_micro_160_tokens" | top_k: 6 → 12',
+        summary: 'Switches the shared RAG retriever to 160-token table-aware micro-chunks. Boosts ESG Reporting dramatically, but severs multi-paragraph statutory exceptions in Tax Compliance.',
+        domains: {
+          consolidation: {
+            t1: [
+              { id: 't1-balance', name: 'Double-Entry Balance Identity (∑Dr = ∑Cr)', pass: true, rate: 100.0, formula: '∑Debits − ∑Credits = €0.00', note: '420/420 balanced.' },
+              { id: 't1-fx', name: 'IAS 21 Rate-Type Enforcement (Closing vs Avg)', pass: true, rate: 100.0, formula: 'BS_Item → FX_Closing | P&L_Item → FX_Avg', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof amount === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'IFRS 10 / ASC 810 Citation URI Integrity', pass: true, rate: 100.0, formula: 'Citation_URI ∈ Verified_Standard_Corpus', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 97.3, base: 97.4, desc: 'Neutral impact on consolidation arithmetic.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.9, base: 98.2, desc: 'Slightly narrower IFRS 10 context window.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 95.5, base: 95.8, desc: 'Clean audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.5, base: 96.5, desc: 'Unchanged.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.5, base: 6.8, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Slightly faster citation inspection due to smaller highlight spans.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.5, base: 2.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Stable (2.5%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.5, base: 1.5, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Stable (1.5%).' }
+            ],
+            diagnosis: 'Neutral impact on Consolidation; passes both Standard and Strict policies.'
+          },
+          planning: {
+            t1: [
+              { id: 't1-balance', name: '3-Statement Balance Sheet Plug Identity', pass: true, rate: 100.0, formula: 'Cash_CF_End == Cash_BS', note: '100% compliant.' },
+              { id: 't1-fx', name: 'Cohort & ARR Roll-Forward Conservation', pass: true, rate: 100.0, formula: 'ARR_t = ARR_{t-1} + New + Exp − Churn', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof driver_val === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'Variance Bridge Sign Consistency', pass: true, rate: 100.0, formula: 'ΔTotal = ΔPrice + ΔVolume + ΔMix + ΔFX', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 96.9, base: 96.8, desc: 'Minimal change as FP&A relies on structured OLAP cubes.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.6, base: 97.5, desc: 'Unchanged.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 95.0, base: 94.9, desc: 'Unchanged.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.1, base: 96.1, desc: 'Unchanged.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.1, base: 6.2, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Healthy (6.1s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.8, base: 2.9, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Healthy (2.8%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.4, base: 1.4, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Healthy (1.4%).' }
+            ],
+            diagnosis: 'Minimal impact on Financial Planning; passes all release gates.'
+          },
+          tax: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 12 Deferred Tax Movement Identity', pass: true, rate: 100.0, formula: 'ΔDTL − ΔDTA = Deferred_Tax_Expense', note: 'Arithmetic identity holds.' },
+              { id: 't1-fx', name: 'OECD Pillar Two 15% Minimum ETR Floor', pass: true, rate: 100.0, formula: 'TopUp% = max(0, 15% − GloBE_ETR)', note: 'Formula holds on retrieved numbers.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof tax_base === Decimal128String', note: 'Schema valid.' },
+              { id: 't1-cite', name: 'Statutory & GloBE Citation Integrity', pass: true, rate: 100.0, formula: 'Article_Ref ∈ OECD_GloBE_Commentary', note: 'Primary article cited, but cross-referenced safe-harbor caveats missed.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 92.1, base: 96.5, desc: 'REGRESSION: Misses De Minimis & transitional CbCR safe-harbor exclusions.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 89.4, base: 97.1, desc: 'REGRESSION: 160-token chunks sever statutory rule from exception paragraph.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 88.6, base: 95.2, desc: 'Incomplete statutory analysis.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 94.2, base: 95.9, desc: 'Triggers extra retrieval calls.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 9.8, base: 7.5, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'BREACH: Tax controllers spend 9.8s checking surrounding statutory context.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 5.4, base: 3.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'BREACH: 5.4% controller override rate on Pillar Two provisions.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 3.6, base: 1.8, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'BREACH: 3.6% fallback rate.' }
+            ],
+            diagnosis: 'CROSS-DOMAIN REGRESSION: 160-token micro-chunking splits OECD Pillar Two rules from their exception clauses 3 paragraphs below!'
+          },
+          esg: {
+            t1: [
+              { id: 't1-balance', name: 'GHG Protocol Dimensional Unit Analysis', pass: true, rate: 100.0, formula: 'Activity_Unit × Factor_Unit → tCO2e', note: '100% verified.' },
+              { id: 't1-fx', name: 'Zero Uncited Emission Factor Guardrail', pass: true, rate: 100.0, formula: 'Factor_ID ∈ {DEFRA, EPA, ecoinvent}', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof emission_qty === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'CSRD / ESRS E1 Paragraph Integrity', pass: true, rate: 100.0, formula: 'DR_Ref ∈ ESRS_E1_Taxonomy', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 98.9, base: 95.2, desc: 'MAJOR GAIN (+3.7%): Exact emission factor row retrieval.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 99.4, base: 94.6, desc: 'MAJOR GAIN (+4.8%): Preserves table header + footnote context per row.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 98.1, base: 93.8, desc: 'Pinpoint citation to exact DEFRA/EPA factor row.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 97.8, base: 95.4, desc: 'Zero redundant factor searches.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 4.3, base: 8.1, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'MAJOR WIN: Drops from 8.1s to 4.3s (-47% controller verification time).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.4, base: 3.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Drops from 3.4% to 1.4%.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.8, base: 2.0, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Drops from 2.0% to 0.8%.' }
+            ],
+            diagnosis: 'MAJOR WIN FOR ESG: Table-aware 160-token chunking slashes Citation Audit Time to 4.3s, but cannot ship globally without domain-routing away from Tax.'
+          },
+          cash: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 7 Cash Roll-Forward Identity', pass: true, rate: 100.0, formula: 'Open + Op + Inv + Fin + FX = Close', note: '100% compliant.' },
+              { id: 't1-fx', name: 'Debt Covenant Ratio Arithmetic', pass: true, rate: 100.0, formula: 'NetDebt / LTM_EBITDA ≤ Covenant_Cap', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof camt053_amt === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'FX Spot vs Forward Bucket Alignment', pass: true, rate: 100.0, formula: 'Settlement_Date ∈ 13Wk_Bucket_i', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 97.1, base: 97.6, desc: 'Minor dilution on multi-page credit agreement definitions.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 96.8, base: 98.0, desc: 'Slightly narrower covenant context.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 95.4, base: 96.2, desc: 'Within gate.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.9, base: 97.0, desc: 'Unchanged.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.4, base: 5.9, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Healthy (6.4s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.4, base: 2.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Healthy (2.4%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.4, base: 1.2, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Healthy (1.4%).' }
+            ],
+            diagnosis: 'Passes Cash Management gates with slight dilution on long-form syndicated loan covenants.'
+          }
+        }
+      },
+      {
+        id: 'hybrid_router',
+        code: 'rc4',
+        title: 'Domain-Adaptive RAG Router + Decimal128 MCP Schema',
+        shortTitle: 'Adaptive RAG + Decimal128 (Full RC)',
+        category: 'Full-Stack Release Candidate',
+        latencyMs: 1410,
+        latencyDelta: '-10ms',
+        costDelta: '+$0.10 / 1k',
+        diffSnippet: 'rag_router: { ESG: "table_160", TAX_CONS: "statutory_640" } + Decimal128_MCP',
+        summary: 'Combines the Decimal128 MCP schema (rc3) with a domain-routed RAG index (160-token table chunks for ESG, 640-token hierarchical statutory chunks for Tax & Consolidation).',
+        domains: {
+          consolidation: {
+            t1: [
+              { id: 't1-balance', name: 'Double-Entry Balance Identity (∑Dr = ∑Cr)', pass: true, rate: 100.0, formula: '∑Debits − ∑Credits = €0.00', note: '420/420 balanced to €0.00.' },
+              { id: 't1-fx', name: 'IAS 21 Rate-Type Enforcement (Closing vs Avg)', pass: true, rate: 100.0, formula: 'BS_Item → FX_Closing | P&L_Item → FX_Avg', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof amount === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'IFRS 10 / ASC 810 Citation URI Integrity', pass: true, rate: 100.0, formula: 'Citation_URI ∈ Verified_Standard_Corpus', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 99.7, base: 97.4, desc: 'Best-in-class consolidation accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 99.2, base: 98.2, desc: 'Full IFRS 10 B86-B99 hierarchy preserved.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 98.8, base: 95.8, desc: 'Complete elimination lineage.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 99.3, base: 96.5, desc: 'Optimal tool trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 4.9, base: 6.8, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Fast 4.9s controller verification.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 0.9, base: 2.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Sub-1% controller override rate.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.6, base: 1.5, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: '0.6% fallback rate.' }
+            ],
+            diagnosis: 'Passes both Standard and Year-End Strict Close policies with wide safety margins.'
+          },
+          planning: {
+            t1: [
+              { id: 't1-balance', name: '3-Statement Balance Sheet Plug Identity', pass: true, rate: 100.0, formula: 'Cash_CF_End == Cash_BS', note: '100% verified.' },
+              { id: 't1-fx', name: 'Cohort & ARR Roll-Forward Conservation', pass: true, rate: 100.0, formula: 'ARR_t = ARR_{t-1} + New + Exp − Churn', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof driver_val === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'Variance Bridge Sign Consistency', pass: true, rate: 100.0, formula: 'ΔTotal = ΔPrice + ΔVolume + ΔMix + ΔFX', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 98.8, base: 96.8, desc: 'Exact 3-statement and FX bridge tie-out.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.4, base: 97.5, desc: 'High faithfulness.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 97.2, base: 94.9, desc: 'Complete driver lineage.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 98.1, base: 96.1, desc: 'Optimal tool execution.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.3, base: 6.2, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: '5.3s verification time.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.6, base: 2.9, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: '1.6% override rate.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.9, base: 1.4, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: '0.9% fallback rate.' }
+            ],
+            diagnosis: 'Exceeds all Standard and Year-End Strict Close thresholds.'
+          },
+          tax: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 12 Deferred Tax Movement Identity', pass: true, rate: 100.0, formula: 'ΔDTL − ΔDTA = Deferred_Tax_Expense', note: '100% verified.' },
+              { id: 't1-fx', name: 'OECD Pillar Two 15% Minimum ETR Floor', pass: true, rate: 100.0, formula: 'TopUp% = max(0, 15% − GloBE_ETR)', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof tax_base === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'Statutory & GloBE Citation Integrity', pass: true, rate: 100.0, formula: 'Article_Ref ∈ OECD_GloBE_Commentary', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 98.4, base: 96.5, desc: '640-token statutory chunks preserve full GloBE safe-harbor exceptions.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.7, base: 97.1, desc: 'Zero severed statutory cross-references.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 97.5, base: 95.2, desc: 'Complete book-to-tax audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 97.9, base: 95.9, desc: 'Clean tool trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.8, base: 7.5, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Drops to 5.8s (well below 7.5s Strict SLA).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.8, base: 3.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Drops to 1.8%.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.1, base: 1.8, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Drops to 1.1%.' }
+            ],
+            diagnosis: 'Resolves the rc2 Tax regression by routing Tax & Consolidation queries to 640-token statutory chunks while keeping ESG on 160-token table chunks.'
+          },
+          esg: {
+            t1: [
+              { id: 't1-balance', name: 'GHG Protocol Dimensional Unit Analysis', pass: true, rate: 100.0, formula: 'Activity_Unit × Factor_Unit → tCO2e', note: '100% verified.' },
+              { id: 't1-fx', name: 'Zero Uncited Emission Factor Guardrail', pass: true, rate: 100.0, formula: 'Factor_ID ∈ {DEFRA, EPA, ecoinvent}', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof emission_qty === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'CSRD / ESRS E1 Paragraph Integrity', pass: true, rate: 100.0, formula: 'DR_Ref ∈ ESRS_E1_Taxonomy', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 99.1, base: 95.2, desc: 'Combines 160-token emission factor chunking with Decimal128 FX spend math.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 99.5, base: 94.6, desc: 'Near-perfect ESRS E1 table grounding.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 98.4, base: 93.8, desc: 'Complete factor & currency lineage.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 98.2, base: 95.4, desc: 'Clean tool execution.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 4.2, base: 8.1, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: '4.2s audit verification time (passes 7.5s Strict SLA).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.2, base: 3.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: '1.2% override rate.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.7, base: 2.0, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: '0.7% fallback rate.' }
+            ],
+            diagnosis: 'Retains the full ESG table-chunking gains and passes even the Year-End Strict Close policy.'
+          },
+          cash: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 7 Cash Roll-Forward Identity', pass: true, rate: 100.0, formula: 'Open + Op + Inv + Fin + FX = Close', note: '100% verified.' },
+              { id: 't1-fx', name: 'Debt Covenant Ratio Arithmetic', pass: true, rate: 100.0, formula: 'NetDebt / LTM_EBITDA ≤ Covenant_Cap', note: '100% verified.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof camt053_amt === Decimal128String', note: '100% verified.' },
+              { id: 't1-cite', name: 'FX Spot vs Forward Bucket Alignment', pass: true, rate: 100.0, formula: 'Settlement_Date ∈ 13Wk_Bucket_i', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 99.3, base: 97.6, desc: 'Exact multi-bank cash pool & FX forward reconciliation.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.9, base: 98.0, desc: 'Full syndicated loan covenant context preserved.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 98.0, base: 96.2, desc: 'Complete ISO 20022 transaction lineage.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 98.7, base: 97.0, desc: 'Optimal tool trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 4.8, base: 5.9, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: '4.8s audit time.' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 1.2, base: 2.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: '1.2% override rate.' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 0.8, base: 1.2, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: '0.8% fallback rate.' }
+            ],
+            diagnosis: 'All 5 Lucanet domains pass both Standard and Year-End Audit-Critical Strict gates.'
+          }
+        }
+      },
+      {
+        id: 'baseline',
+        code: 'v2.4',
+        title: 'Production Baseline (Current Reference Core)',
+        shortTitle: 'Production Baseline (v2.4)',
+        category: 'Reference Baseline',
+        latencyMs: 1420,
+        latencyDelta: '0ms',
+        costDelta: 'Baseline ($14.50/1k)',
+        diffSnippet: 'model: "claude-sonnet-tier" | chunk: "fixed_512" | tool_args: "float64_json"',
+        summary: 'Current production reference core: frontier reasoning model, 512-token fixed RAG chunking, standard JSON numbers, and symbolic balance checker.',
+        domains: {
+          consolidation: {
+            t1: [
+              { id: 't1-balance', name: 'Double-Entry Balance Identity (∑Dr = ∑Cr)', pass: true, rate: 100.0, formula: '∑Debits − ∑Credits = €0.00', note: '420/420 balanced.' },
+              { id: 't1-fx', name: 'IAS 21 Rate-Type Enforcement (Closing vs Avg)', pass: true, rate: 100.0, formula: 'BS_Item → FX_Closing | P&L_Item → FX_Avg', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof amount === Decimal128String', note: 'Baseline float64 passes standard tolerance.' },
+              { id: 't1-cite', name: 'IFRS 10 / ASC 810 Citation URI Integrity', pass: true, rate: 100.0, formula: 'Citation_URI ∈ Verified_Standard_Corpus', note: '100% verified.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 97.4, base: 97.4, desc: 'Reference baseline accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.2, base: 98.2, desc: 'Reference baseline groundedness.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 95.8, base: 95.8, desc: 'Reference baseline audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.5, base: 96.5, desc: 'Reference baseline trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.8, base: 6.8, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Baseline audit verification time (6.8s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.4, base: 2.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Baseline controller override rate (2.4%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.5, base: 1.5, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Baseline fallback rate (1.5%).' }
+            ],
+            diagnosis: 'Reference production baseline passes all Standard and Strict consolidation gates.'
+          },
+          planning: {
+            t1: [
+              { id: 't1-balance', name: '3-Statement Balance Sheet Plug Identity', pass: true, rate: 100.0, formula: 'Cash_CF_End == Cash_BS', note: '100% compliant.' },
+              { id: 't1-fx', name: 'Cohort & ARR Roll-Forward Conservation', pass: true, rate: 100.0, formula: 'ARR_t = ARR_{t-1} + New + Exp − Churn', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof driver_val === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'Variance Bridge Sign Consistency', pass: true, rate: 100.0, formula: 'ΔTotal = ΔPrice + ΔVolume + ΔMix + ΔFX', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 96.8, base: 96.8, desc: 'Baseline accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.5, base: 97.5, desc: 'Baseline groundedness.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 94.9, base: 94.9, desc: 'Baseline audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 96.1, base: 96.1, desc: 'Baseline trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 6.2, base: 6.2, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Baseline (6.2s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.9, base: 2.9, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Baseline (2.9%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.4, base: 1.4, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Baseline (1.4%).' }
+            ],
+            diagnosis: 'Reference production baseline passes Standard policy; borderline on Strict Close Tier 2 average (96.3% vs 96.5%).'
+          },
+          tax: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 12 Deferred Tax Movement Identity', pass: true, rate: 100.0, formula: 'ΔDTL − ΔDTA = Deferred_Tax_Expense', note: '100% compliant.' },
+              { id: 't1-fx', name: 'OECD Pillar Two 15% Minimum ETR Floor', pass: true, rate: 100.0, formula: 'TopUp% = max(0, 15% − GloBE_ETR)', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof tax_base === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'Statutory & GloBE Citation Integrity', pass: true, rate: 100.0, formula: 'Article_Ref ∈ OECD_GloBE_Commentary', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 96.5, base: 96.5, desc: 'Baseline accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 97.1, base: 97.1, desc: 'Baseline groundedness.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 95.2, base: 95.2, desc: 'Baseline audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 95.9, base: 95.9, desc: 'Baseline trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 7.5, base: 7.5, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Baseline (7.5s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 3.1, base: 3.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Baseline (3.1% — breaches 3.0% Strict Close cap).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.8, base: 1.8, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Baseline (1.8%).' }
+            ],
+            diagnosis: 'Passes Standard Policy; requires rc4 upgrade to clear Year-End Strict Close thresholds.'
+          },
+          esg: {
+            t1: [
+              { id: 't1-balance', name: 'GHG Protocol Dimensional Unit Analysis', pass: true, rate: 100.0, formula: 'Activity_Unit × Factor_Unit → tCO2e', note: '100% compliant.' },
+              { id: 't1-fx', name: 'Zero Uncited Emission Factor Guardrail', pass: true, rate: 100.0, formula: 'Factor_ID ∈ {DEFRA, EPA, ecoinvent}', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof emission_qty === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'CSRD / ESRS E1 Paragraph Integrity', pass: true, rate: 100.0, formula: 'DR_Ref ∈ ESRS_E1_Taxonomy', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 95.2, base: 95.2, desc: 'Baseline accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 94.6, base: 94.6, desc: '512-token chunks dilute dense emission factor tables.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 93.8, base: 93.8, desc: 'Baseline audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 95.4, base: 95.4, desc: 'Baseline trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 8.1, base: 8.1, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Baseline (8.1s — slow table look-ups).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 3.4, base: 3.4, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Baseline (3.4%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 2.0, base: 2.0, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Baseline (2.0%).' }
+            ],
+            diagnosis: 'Passes Standard Policy, but fails Year-End Strict Close policy across Tier 2 and Tier 3.'
+          },
+          cash: {
+            t1: [
+              { id: 't1-balance', name: 'IAS 7 Cash Roll-Forward Identity', pass: true, rate: 100.0, formula: 'Open + Op + Inv + Fin + FX = Close', note: '100% compliant.' },
+              { id: 't1-fx', name: 'Debt Covenant Ratio Arithmetic', pass: true, rate: 100.0, formula: 'NetDebt / LTM_EBITDA ≤ Covenant_Cap', note: '100% compliant.' },
+              { id: 't1-mcp', name: 'MCP Decimal128 Precision Guard', pass: true, rate: 100.0, formula: 'typeof camt053_amt === Decimal128String', note: '100% compliant.' },
+              { id: 't1-cite', name: 'FX Spot vs Forward Bucket Alignment', pass: true, rate: 100.0, formula: 'Settlement_Date ∈ 13Wk_Bucket_i', note: '100% compliant.' }
+            ],
+            t2: [
+              { id: 't2-num', name: 'Numerical Exactness (±0.01 bps)', score: 97.6, base: 97.6, desc: 'Baseline accuracy.' },
+              { id: 't2-gnd', name: 'Standard Groundedness', score: 98.0, base: 98.0, desc: 'Baseline groundedness.' },
+              { id: 't2-aud', name: 'Audit Trail Completeness', score: 96.2, base: 96.2, desc: 'Baseline audit trail.' },
+              { id: 't2-trj', name: 'MCP Tool Trajectory Accuracy', score: 97.0, base: 97.0, desc: 'Baseline trajectory.' }
+            ],
+            t3: [
+              { id: 't3-audit', name: 'Citation Audit Time', val: 5.9, base: 5.9, unit: 's', maxStd: 8.5, maxStrict: 7.5, scaleMax: 14, desc: 'Baseline (5.9s).' },
+              { id: 't3-ovrd', name: 'Override Rate', val: 2.1, base: 2.1, unit: '%', maxStd: 4.0, maxStrict: 3.0, scaleMax: 12, desc: 'Baseline (2.1%).' },
+              { id: 't3-fall', name: 'Fallback Rate', val: 1.2, base: 1.2, unit: '%', maxStd: 2.5, maxStrict: 1.8, scaleMax: 10, desc: 'Baseline (1.2%).' }
+            ],
+            diagnosis: 'Reference baseline passes both Standard and Strict policies in Cash Management.'
+          }
+        }
+      }
+    ];
+
+    // ---------------------------------------------------------------------------
+    // 3. GATE EVALUATOR
+    // ---------------------------------------------------------------------------
+    function evaluateDomain(domData, isStrict) {
+      const t2Gate = isStrict ? 96.5 : 94.0;
+      const t1PassedCount = domData.t1.filter(i => i.pass).length;
+      const t1AllPass = t1PassedCount === domData.t1.length;
+
+      const t2Avg = +(domData.t2.reduce((acc, item) => acc + item.score, 0) / domData.t2.length).toFixed(1);
+      const t2Pass = t2Avg >= t2Gate;
+
+      const t3Pass = domData.t3.every(sig => {
+        const cap = isStrict ? sig.maxStrict : sig.maxStd;
+        return sig.val <= cap;
+      });
+
+      let status = 'PASS';
+      let label = 'READY';
+      if (!t1AllPass) {
+        status = 'BLOCKED';
+        label = 'BLOCKED';
+      } else if (!t2Pass || !t3Pass) {
+        status = 'WARN';
+        label = 'CANARY';
+      }
+
+      return { status, label, t1PassedCount, t1AllPass, t2Avg, t2Gate, t2Pass, t3Pass };
+    }
+
+    // ---------------------------------------------------------------------------
+    // 4. MAIN APPLICATION COMPONENT (RAFAEL SCHAAD / CRON PRECISION INSTRUMENT)
+    // ---------------------------------------------------------------------------
+    function App() {
+      const [scenarioId, setScenarioId] = useState('modify_mcp_fx');
+      const [domainId, setDomainId] = useState('consolidation');
+      const [isStrict, setIsStrict] = useState(false);
+      const [isDark, setIsDark] = useState(true);
+      const [inspectedItem, setInspectedItem] = useState({ tier: 'T3', id: 't3-audit' });
+
+      // Toggle HTML dark class
+      useEffect(() => {
+        const rootEl = document.documentElement;
+        if (isDark) rootEl.classList.add('dark');
+        else rootEl.classList.remove('dark');
+      }, [isDark]);
+
+      // Rafael Schaad Signature: Full Keyboard-First Navigation
+      const handleKeyDown = useCallback((e) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+
+        // 1-5 switches Lucanet product domains
+        if (['1', '2', '3', '4', '5'].includes(e.key)) {
+          const idx = parseInt(e.key, 10) - 1;
+          if (PRODUCT_DOMAINS[idx]) setDomainId(PRODUCT_DOMAINS[idx].id);
+        }
+        // Up/Down or J/K cycles Shared Core Changes
+        else if (e.key === 'ArrowDown' || e.key.toLowerCase() === 'j') {
+          e.preventDefault();
+          const currIdx = SCENARIOS.findIndex(s => s.id === scenarioId);
+          const nextIdx = (currIdx + 1) % SCENARIOS.length;
+          setScenarioId(SCENARIOS[nextIdx].id);
+        } else if (e.key === 'ArrowUp' || e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          const currIdx = SCENARIOS.findIndex(s => s.id === scenarioId);
+          const prevIdx = (currIdx - 1 + SCENARIOS.length) % SCENARIOS.length;
+          setScenarioId(SCENARIOS[prevIdx].id);
+        }
+        // P toggles Gate Policy
+        else if (e.key.toLowerCase() === 'p') {
+          setIsStrict(prev => !prev);
+        }
+        // T toggles Dark/Light theme
+        else if (e.key.toLowerCase() === 't') {
+          setIsDark(prev => !prev);
+        }
+      }, [scenarioId]);
+
+      useEffect(() => {
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [handleKeyDown]);
+
+      const scenario = useMemo(() => SCENARIOS.find(s => s.id === scenarioId), [scenarioId]);
+      const domain = useMemo(() => PRODUCT_DOMAINS.find(d => d.id === domainId), [domainId]);
+      const domData = scenario.domains[domainId];
+
+      const allEvals = useMemo(() => {
+        const map = {};
+        PRODUCT_DOMAINS.forEach(d => {
+          map[d.id] = evaluateDomain(scenario.domains[d.id], isStrict);
+        });
+        return map;
+      }, [scenario, isStrict]);
+
+      const activeEval = allEvals[domainId];
+
+      // Global Verdict across all 5 shared domains
+      const globalGate = useMemo(() => {
+        const vals = Object.values(allEvals);
+        const blocked = vals.filter(v => v.status === 'BLOCKED').length;
+        const warn = vals.filter(v => v.status === 'WARN').length;
+        if (blocked > 0) {
+          return {
+            status: 'BLOCKED',
+            label: 'RELEASE BLOCKED',
+            summary: `${blocked}/5 domains failed Tier 1 hard invariants`,
+            badge: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30',
+            dot: 'bg-rose-500'
+          };
+        }
+        if (warn > 0) {
+          return {
+            status: 'WARN',
+            label: 'CANARY / FLAG ONLY',
+            summary: `${warn}/5 domains breached Tier 2/3 thresholds`,
+            badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30',
+            dot: 'bg-amber-500'
+          };
+        }
+        return {
+          status: 'PASS',
+          label: 'APPROVED TO SHIP',
+          summary: 'All 5 domains pass all 3 evaluation tiers',
+          badge: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30',
+          dot: 'bg-emerald-500'
+        };
+      }, [allEvals]);
+
+      // Resolve currently inspected item for the right-hand Cron Inspector Panel
+      const inspectorDetail = useMemo(() => {
+        if (inspectedItem.tier === 'T1') {
+          const item = domData.t1.find(x => x.id === inspectedItem.id) || domData.t1[0];
+          return {
+            tierBadge: 'Tier 1 · Deterministic Assertion',
+            title: item.name,
+            status: item.pass ? 'PASS (100.0%)' : `FAIL (${item.rate}%)`,
+            isOk: item.pass,
+            primaryMetric: `${item.rate.toFixed(1)}%`,
+            targetLabel: 'Required: 100.0% (Hard Gate)',
+            formula: item.formula,
+            explanation: item.note,
+            actionable: item.pass
+              ? 'Deterministic runtime guard active. Zero-tolerance invariant holds across all test cases.'
+              : 'Hard release blocker. Enable symbolic accounting solver or revert model/schema change before promotion.'
+          };
+        }
+        if (inspectedItem.tier === 'T2') {
+          const item = domData.t2.find(x => x.id === inspectedItem.id) || domData.t2[0];
+          const diff = +(item.score - item.base).toFixed(1);
+          const ok = item.score >= activeEval.t2Gate;
+          return {
+            tierBadge: 'Tier 2 · Offline Golden Benchmark',
+            title: item.name,
+            status: ok ? 'WITHIN GATE' : 'BELOW THRESHOLD',
+            isOk: ok,
+            primaryMetric: `${item.score.toFixed(1)}%`,
+            targetLabel: `Gate ≥ ${activeEval.t2Gate}%  |  Baseline: ${item.base}% (${diff >= 0 ? '+' : ''}${diff}%)`,
+            formula: domain.equation,
+            explanation: item.desc,
+            actionable: ok
+              ? `Golden suite (n=${domain.suiteSize}) clears the ${activeEval.t2Gate}% threshold under ${domain.standards}.`
+              : `Benchmark regression of ${diff}% vs v2.4 baseline. Inspect failing ${domain.short} golden test traces.`
+          };
+        }
+        const item = domData.t3.find(x => x.id === inspectedItem.id) || domData.t3[0];
+        const cap = isStrict ? item.maxStrict : item.maxStd;
+        const diff = +(item.val - item.base).toFixed(1);
+        const ok = item.val <= cap;
+        return {
+          tierBadge: 'Tier 3 · Online Production Signal',
+          title: item.name,
+          status: ok ? 'SLA HEALTHY' : 'SLA BREACH',
+          isOk: ok,
+          primaryMetric: `${item.val.toFixed(1)}${item.unit}`,
+          targetLabel: `Max SLA ≤ ${cap.toFixed(1)}${item.unit}  |  Baseline: ${item.base}${item.unit} (${diff >= 0 ? '+' : ''}${diff}${item.unit})`,
+          formula: `Canary_Stream(${item.id}) ≤ ${cap.toFixed(1)}${item.unit}`,
+          explanation: item.desc,
+          actionable: ok
+            ? 'Shadow/canary telemetry operating within human-in-the-loop controller SLA.'
+            : 'Automatic canary rollback trigger tripped. Controller friction exceeds release gate SLA.'
+        };
+      }, [inspectedItem, domData, activeEval, isStrict, domain]);
+
+      return (
+        <div className="min-h-screen flex flex-col justify-between">
+          <div>
+            {/* 1. MANDATORY GOVERNANCE BANNER (CRISP SINGLE-LINE HUD BAR) */}
+            <div className="bg-[#191918] text-[#D4D4D0] border-b border-[#2B2B28] px-4 py-1.5 text-[11px]">
+              <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cron-emerald"></span>
+                  <span className="font-mono uppercase tracking-wider text-[10px] text-cron-emerald font-semibold">
+                    Zero Proprietary Data
+                  </span>
+                  <span className="text-[#6E6E6A]">•</span>
+                  <span>
+                    All scenarios, golden benchmarks, and assertions use <strong>public accounting logic</strong> (IFRS 10, IAS 21, IAS 12, IAS 7, ASC 810, OECD Pillar Two, CSRD/ESRS E1) and <strong>zero proprietary data</strong>.
+                  </span>
+                </div>
+                <div className="hidden md:flex items-center gap-3 font-mono text-[10px] text-[#8E8E8A]">
+                  <span><span className="keycap">1</span>–<span className="keycap">5</span> Domain</span>
+                  <span><span className="keycap">↑</span><span className="keycap">↓</span> Core Change</span>
+                  <span><span className="keycap">P</span> Policy</span>
+                  <span><span className="keycap">T</span> Theme</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. PRECISION INSTRUMENT HEADER */}
+            <header className="border-b border-neutral-200 dark:border-cron-border bg-white/90 dark:bg-cron-panel/90 backdrop-blur sticky top-0 z-20">
+              <div className="max-w-[1400px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-2.5 h-6 rounded-sm bg-cron-coral"></div>
+                  <div>
+                    <h1 className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-[#F4F4F0]">
+                      Shared Finance AI Core — Eval &amp; Release Gate Simulator{' '}
+                      <span className="font-normal text-neutral-500 dark:text-[#8E8E8A]">
+                        (Built by Unmesh Karnekar in Claude Code)
+                      </span>
+                    </h1>
+                  </div>
+                </div>
+
+                {/* Right HUD Controls: Global Gate Status + Policy Toggle + Theme Toggle */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Global Release Gate Pill */}
+                  <div className={`flex items-center gap-2 px-3 py-1 rounded-md border text-xs font-mono font-medium ${globalGate.badge}`}>
+                    <span className={`w-2 h-2 rounded-full ${globalGate.dot}`}></span>
+                    <span>{globalGate.label}</span>
+                    <span className="opacity-60 hidden sm:inline">({globalGate.summary})</span>
+                  </div>
+
+                  {/* Policy Segmented Control */}
+                  <button
+                    onClick={() => setIsStrict(!isStrict)}
+                    className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-cron-border bg-neutral-100 dark:bg-cron-elevated text-xs font-medium hover:border-neutral-400 dark:hover:border-neutral-600 transition"
+                    title="Press P to toggle release policy"
+                  >
+                    <span className="text-neutral-500 dark:text-[#8E8E8A]">Policy:</span>
+                    <span className="font-semibold text-neutral-900 dark:text-white">
+                      {isStrict ? 'Year-End Strict' : 'Standard CD'}
+                    </span>
+                    <span className="keycap">P</span>
+                  </button>
+
+                  {/* Theme Switcher */}
+                  <button
+                    onClick={() => setIsDark(!isDark)}
+                    className="px-2.5 py-1 rounded-md border border-neutral-200 dark:border-cron-border bg-neutral-100 dark:bg-cron-elevated text-xs font-medium hover:border-neutral-400 dark:hover:border-neutral-600 transition flex items-center gap-1.5"
+                    title="Press T to toggle Dark/Light mode"
+                  >
+                    <span>{isDark ? 'Dark' : 'Light'}</span>
+                    <span className="keycap">T</span>
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            {/* 3. FIXED-GRID 3-PANE INSTRUMENT WORKSPACE (ZERO LAYOUT SHIFT) */}
+            <main className="max-w-[1400px] mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+              {/* ================================================================= */}
+              {/* LEFT PANE (3 COLS): SHARED CORE CHANGE SELECTOR + DIFF            */}
+              {/* ================================================================= */}
+              <aside className="lg:col-span-3 bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl overflow-hidden">
+                <div className="px-3.5 py-2.5 border-b border-neutral-200 dark:border-cron-border flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 dark:text-[#8E8E8A] font-medium">
+                    Shared Core Changes
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="keycap">↑</span>
+                    <span className="keycap">↓</span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-neutral-100 dark:divide-cron-borderSubtle">
+                  {SCENARIOS.map((s) => {
+                    const active = s.id === scenarioId;
+                    // Compute quick mini-dots for how this scenario fares across the 5 domains
+                    const miniStatuses = PRODUCT_DOMAINS.map(d => evaluateDomain(s.domains[d.id], isStrict).status);
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setScenarioId(s.id)}
+                        className={`w-full text-left px-3.5 py-3 transition relative flex flex-col gap-1.5 ${
+                          active
+                            ? 'bg-neutral-900/5 dark:bg-white/[0.05]'
+                            : 'hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
+                        }`}
+                      >
+                        {active && (
+                          <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-cron-coral"></span>
+                        )}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-200/70 dark:bg-cron-elevated text-neutral-700 dark:text-[#A0A09C]">
+                            {s.code} · {s.category}
+                          </span>
+                          {/* 5-Domain Micro Blast Radius Dots */}
+                          <div className="flex items-center gap-1" title="Status across 5 Lucanet domains">
+                            {miniStatuses.map((st, idx) => (
+                              <span
+                                key={idx}
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  st === 'PASS'
+                                    ? 'bg-cron-emerald'
+                                    : st === 'WARN'
+                                    ? 'bg-cron-amber'
+                                    : 'bg-cron-rose'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className={`text-xs font-semibold leading-snug ${
+                          active ? 'text-neutral-900 dark:text-white' : 'text-neutral-700 dark:text-[#C8C8C4]'
+                        }`}>
+                          {s.title}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] font-mono text-neutral-500 dark:text-[#8E8E8A] tabular-nums">
+                          <span>p95: {s.latencyMs}ms ({s.latencyDelta})</span>
+                          <span>{s.costDelta}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Architectural Diff Box */}
+                <div className="p-3.5 bg-neutral-50 dark:bg-[#141413] border-t border-neutral-200 dark:border-cron-border space-y-2">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 dark:text-[#6E6E6A]">
+                    Shared Core Config Diff
+                  </div>
+                  <div className="font-mono text-[11px] text-neutral-700 dark:text-[#D4D4D0] bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded p-2 leading-relaxed break-words">
+                    {scenario.diffSnippet}
+                  </div>
+                  <p className="text-[11px] text-neutral-500 dark:text-[#8E8E8A] leading-relaxed">
+                    {scenario.summary}
+                  </p>
+                </div>
+              </aside>
+
+              {/* ================================================================= */}
+              {/* CENTER PANE (6 COLS): 5-DOMAIN BAR + 3-TIER BULLET SCORECARD      */}
+              {/* ================================================================= */}
+              <section className="lg:col-span-6 space-y-3">
+
+                {/* LUCANET 5 PRODUCT DOMAINS KEYBOARD STRIP */}
+                <div className="bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl p-1.5 grid grid-cols-5 gap-1">
+                  {PRODUCT_DOMAINS.map((d) => {
+                    const ev = allEvals[d.id];
+                    const active = d.id === domainId;
+                    const dotColor =
+                      ev.status === 'PASS'
+                        ? 'bg-cron-emerald'
+                        : ev.status === 'WARN'
+                        ? 'bg-cron-amber'
+                        : 'bg-cron-rose';
+
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => setDomainId(d.id)}
+                        className={`px-2.5 py-2 rounded-lg text-left transition flex flex-col justify-between ${
+                          active
+                            ? 'bg-neutral-900 text-white dark:bg-cron-elevated dark:text-white shadow-sm ring-1 ring-neutral-900/10 dark:ring-white/15'
+                            : 'hover:bg-neutral-100 dark:hover:bg-white/[0.03] text-neutral-700 dark:text-[#A0A09C]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="keycap">{d.key}</span>
+                          <span className="inline-flex items-center gap-1 font-mono text-[10px]">
+                            <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`}></span>
+                            <span className="hidden sm:inline">{ev.label}</span>
+                          </span>
+                        </div>
+                        <div className="text-xs font-semibold mt-1.5 truncate">
+                          {d.name}
+                        </div>
+                        <div className={`text-[10px] font-mono truncate ${active ? 'text-neutral-300 dark:text-[#8E8E8A]' : 'text-neutral-400 dark:text-[#6E6E6A]'}`}>
+                          T2: {ev.t2Avg}%
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* DOMAIN CONTEXT + TAKEAWAY BAR */}
+                <div className="bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-neutral-900 dark:text-white">
+                        {domain.name}
+                      </span>
+                      <span className="text-[11px] font-mono text-neutral-500 dark:text-[#8E8E8A]">
+                        {domain.standards}
+                      </span>
+                    </div>
+                    <p className="text-xs text-neutral-600 dark:text-[#A0A09C] mt-0.5">
+                      {domData.diagnosis}
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded text-[11px] font-mono font-semibold shrink-0 self-start sm:self-center ${
+                    activeEval.status === 'PASS'
+                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                      : activeEval.status === 'WARN'
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                      : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {activeEval.label}
+                  </span>
+                </div>
+
+                {/* TIER 1: DETERMINISTIC ASSERTIONS */}
+                <div className="bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-neutral-200 dark:border-cron-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 dark:text-[#8E8E8A] font-semibold">
+                        Tier 1 · Deterministic Assertions
+                      </span>
+                      <span className="text-[11px] font-mono text-neutral-400 dark:text-[#6E6E6A]">
+                        (Hard Blocking Gate = 100%)
+                      </span>
+                    </div>
+                    <span className={`font-mono text-xs font-semibold tabular-nums ${
+                      activeEval.t1AllPass ? 'text-cron-emerald' : 'text-cron-rose'
+                    }`}>
+                      {activeEval.t1PassedCount}/4 Passed
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-neutral-100 dark:divide-cron-borderSubtle">
+                    {domData.t1.map((item) => {
+                      const isSelected = inspectedItem.tier === 'T1' && inspectedItem.id === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => setInspectedItem({ tier: 'T1', id: item.id })}
+                          className={`w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition ${
+                            isSelected
+                              ? 'bg-neutral-900/5 dark:bg-white/[0.06]'
+                              : 'hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${item.pass ? 'bg-cron-emerald' : 'bg-cron-rose'}`}></span>
+                            <span className={`text-xs truncate ${item.pass ? 'text-neutral-800 dark:text-[#E2E2DE]' : 'text-rose-600 dark:text-rose-400 font-semibold'}`}>
+                              {item.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 font-mono text-xs tabular-nums">
+                            <span className="text-[11px] text-neutral-400 dark:text-[#6E6E6A] hidden sm:inline">
+                              {item.formula}
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
+                              item.pass
+                                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                            }`}>
+                              {item.rate.toFixed(1)}%
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* TIER 2: OFFLINE GOLDEN BENCHMARK SCORES (WITH THRESHOLD RULERS) */}
+                <div className="bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-neutral-200 dark:border-cron-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 dark:text-[#8E8E8A] font-semibold">
+                        Tier 2 · Offline Golden Benchmarks
+                      </span>
+                      <span className="text-[11px] font-mono text-neutral-400 dark:text-[#6E6E6A]">
+                        (n={domain.suiteSize} · Gate ≥ {activeEval.t2Gate}%)
+                      </span>
+                    </div>
+                    <span className={`font-mono text-xs font-semibold tabular-nums ${
+                      activeEval.t2Pass ? 'text-cron-emerald' : 'text-cron-amber'
+                    }`}>
+                      Avg: {activeEval.t2Avg}%
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-neutral-100 dark:divide-cron-borderSubtle">
+                    {domData.t2.map((item) => {
+                      const isSelected = inspectedItem.tier === 'T2' && inspectedItem.id === item.id;
+                      const ok = item.score >= activeEval.t2Gate;
+                      const diff = +(item.score - item.base).toFixed(1);
+                      // Map 80%..100% onto 0%..100% bar width for crisp visual resolution
+                      const toPct = (v) => Math.max(0, Math.min(100, ((v - 80) / 20) * 100));
+
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => setInspectedItem({ tier: 'T2', id: item.id })}
+                          className={`w-full text-left px-4 py-2.5 transition ${
+                            isSelected
+                              ? 'bg-neutral-900/5 dark:bg-white/[0.06]'
+                              : 'hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-xs font-medium text-neutral-800 dark:text-[#E2E2DE]">
+                              {item.name}
+                            </span>
+
+                            {/* Spatial Bullet Gauge + Tabular Readout */}
+                            <div className="flex items-center gap-3 shrink-0">
+                              <div className="w-28 sm:w-36 h-2 bg-neutral-200 dark:bg-cron-elevated rounded-sm relative overflow-visible">
+                                {/* Filled Bar */}
+                                <div
+                                  className={`h-full rounded-sm transition-all duration-200 ${
+                                    ok ? 'bg-cron-emerald' : 'bg-cron-amber'
+                                  }`}
+                                  style={{ width: `${toPct(item.score)}%` }}
+                                />
+                                {/* Gate Threshold Tick Line */}
+                                <div
+                                  className="absolute -top-1 -bottom-1 w-[2px] bg-neutral-900 dark:bg-white z-10"
+                                  style={{ left: `${toPct(activeEval.t2Gate)}%` }}
+                                  title={`Gate Threshold: ${activeEval.t2Gate}%`}
+                                />
+                              </div>
+
+                              <div className="font-mono text-xs tabular-nums w-24 text-right">
+                                <span className={`font-semibold ${ok ? 'text-neutral-900 dark:text-white' : 'text-cron-amber'}`}>
+                                  {item.score.toFixed(1)}%
+                                </span>{' '}
+                                <span className={`text-[10px] ${diff >= 0 ? 'text-cron-emerald' : 'text-cron-rose'}`}>
+                                  {diff >= 0 ? '+' : ''}{diff}%
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* TIER 3: ONLINE PRODUCTION SIGNALS (CITATION AUDIT TIME, OVERRIDE RATE, FALLBACK RATE) */}
+                <div className="bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-neutral-200 dark:border-cron-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 dark:text-[#8E8E8A] font-semibold">
+                        Tier 3 · Online Production Signals
+                      </span>
+                      <span className="text-[11px] font-mono text-neutral-400 dark:text-[#6E6E6A]">
+                        (Lower is Better · Canary Stream)
+                      </span>
+                    </div>
+                    <span className={`font-mono text-xs font-semibold ${
+                      activeEval.t3Pass ? 'text-cron-emerald' : 'text-cron-amber'
+                    }`}>
+                      {activeEval.t3Pass ? 'SLAs Healthy' : 'SLA Breach'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-neutral-100 dark:divide-cron-borderSubtle">
+                    {domData.t3.map((sig) => {
+                      const isSelected = inspectedItem.tier === 'T3' && inspectedItem.id === sig.id;
+                      const cap = isStrict ? sig.maxStrict : sig.maxStd;
+                      const ok = sig.val <= cap;
+                      const diff = +(sig.val - sig.base).toFixed(1);
+                      const pctVal = Math.min(100, (sig.val / sig.scaleMax) * 100);
+                      const pctCap = Math.min(100, (cap / sig.scaleMax) * 100);
+
+                      return (
+                        <button
+                          key={sig.id}
+                          onClick={() => setInspectedItem({ tier: 'T3', id: sig.id })}
+                          className={`p-3.5 text-left transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-neutral-900/5 dark:bg-white/[0.06]'
+                              : 'hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-xs font-medium text-neutral-600 dark:text-[#A0A09C]">
+                              {sig.name}
+                            </span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-cron-emerald' : 'bg-cron-amber'}`}></span>
+                          </div>
+
+                          <div className="my-2 flex items-baseline justify-between font-mono tabular-nums">
+                            <span className={`text-xl font-semibold ${ok ? 'text-neutral-900 dark:text-white' : 'text-cron-amber'}`}>
+                              {sig.val.toFixed(1)}{sig.unit}
+                            </span>
+                            <span className={`text-[11px] ${diff <= 0 ? 'text-cron-emerald' : 'text-cron-rose'}`}>
+                              {diff > 0 ? '+' : ''}{diff}{sig.unit}
+                            </span>
+                          </div>
+
+                          {/* Bullet Gauge with Max SLA Ceiling Line */}
+                          <div className="w-full h-1.5 bg-neutral-200 dark:bg-cron-elevated rounded-sm relative my-1">
+                            <div
+                              className={`h-full rounded-sm transition-all duration-200 ${ok ? 'bg-cron-emerald' : 'bg-cron-amber'}`}
+                              style={{ width: `${pctVal}%` }}
+                            />
+                            <div
+                              className="absolute -top-1 -bottom-1 w-[2px] bg-neutral-900 dark:bg-white"
+                              style={{ left: `${pctCap}%` }}
+                              title={`Max SLA Ceiling: ${cap}${sig.unit}`}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] font-mono text-neutral-400 dark:text-[#6E6E6A] mt-1">
+                            <span>Base: {sig.base}{sig.unit}</span>
+                            <span>Max ≤ {cap}{sig.unit}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              {/* ================================================================= */}
+              {/* RIGHT PANE (3 COLS): CRON-STYLE PERSISTENT CONTEXT INSPECTOR      */}
+              {/* ================================================================= */}
+              <aside className="lg:col-span-3 bg-white dark:bg-cron-panel border border-neutral-200 dark:border-cron-border rounded-xl overflow-hidden sticky top-16">
+                <div className="px-4 py-2.5 border-b border-neutral-200 dark:border-cron-border flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 dark:text-[#8E8E8A] font-medium">
+                    Context Inspector
+                  </span>
+                  <span className="text-[10px] font-mono text-neutral-400 dark:text-[#6E6E6A]">
+                    Click any metric
+                  </span>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  {/* Inspected Metric Header */}
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-cron-coral font-semibold">
+                        {inspectorDetail.tierBadge}
+                      </span>
+                      <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${
+                        inspectorDetail.isOk
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                          : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                      }`}>
+                        {inspectorDetail.status}
+                      </span>
+                    </div>
+
+                    <h2 className="text-sm font-semibold text-neutral-900 dark:text-white mt-1.5 leading-snug">
+                      {inspectorDetail.title}
+                    </h2>
+
+                    <div className="mt-3 p-3 rounded-lg bg-neutral-50 dark:bg-[#141413] border border-neutral-200 dark:border-cron-border flex items-baseline justify-between font-mono tabular-nums">
+                      <span className="text-2xl font-bold text-neutral-900 dark:text-white">
+                        {inspectorDetail.primaryMetric}
+                      </span>
+                      <span className="text-[11px] text-neutral-500 dark:text-[#8E8E8A]">
+                        {domain.short} · {scenario.code}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-neutral-500 dark:text-[#8E8E8A] mt-1.5">
+                      {inspectorDetail.targetLabel}
+                    </div>
+                  </div>
+
+                  {/* Public Accounting Formula / Rule */}
+                  <div className="pt-3 border-t border-neutral-100 dark:border-cron-borderSubtle space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 dark:text-[#6E6E6A]">
+                      Public Accounting Identity / Rule
+                    </div>
+                    <div className="p-2.5 rounded bg-neutral-50 dark:bg-[#141413] border border-neutral-200 dark:border-cron-border font-mono text-[11px] text-neutral-800 dark:text-[#D4D4D0] break-words">
+                      {inspectorDetail.formula}
+                    </div>
+                  </div>
+
+                  {/* Telemetry & Diagnostic Explanation */}
+                  <div className="pt-3 border-t border-neutral-100 dark:border-cron-borderSubtle space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 dark:text-[#6E6E6A]">
+                      Evaluation Telemetry
+                    </div>
+                    <p className="text-xs text-neutral-600 dark:text-[#A0A09C] leading-relaxed">
+                      {inspectorDetail.explanation}
+                    </p>
+                  </div>
+
+                  {/* Release Engineer Recommendation */}
+                  <div className="pt-3 border-t border-neutral-100 dark:border-cron-borderSubtle space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 dark:text-[#6E6E6A]">
+                      Release Gate Action
+                    </div>
+                    <p className="text-xs text-neutral-800 dark:text-[#E2E2DE] leading-relaxed font-medium">
+                      {inspectorDetail.actionable}
+                    </p>
+                  </div>
+
+                  {/* Domain Scope Footer inside Inspector */}
+                  <div className="pt-3 border-t border-neutral-100 dark:border-cron-borderSubtle text-[11px] text-neutral-400 dark:text-[#6E6E6A] space-y-1">
+                    <div className="font-mono text-[10px] uppercase">
+                      {domain.name} Scope ({domain.standards})
+                    </div>
+                    <p className="leading-relaxed">
+                      {domain.scope}
+                    </p>
+                  </div>
+                </div>
+              </aside>
+
+            </main>
+          </div>
+
+          {/* 4. MINIMAL INSTRUMENT FOOTER */}
+          <footer className="border-t border-neutral-200 dark:border-cron-border py-2.5 px-4 text-[11px] text-neutral-500 dark:text-[#6E6E6A] bg-white dark:bg-cron-panel mt-6">
+            <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-2 font-mono">
+              <span>
+                Shared Finance AI Core — Eval &amp; Release Gate Simulator (Built by Unmesh Karnekar in Claude Code)
+              </span>
+              <span>
+                Public Accounting Logic Only · Zero Proprietary Data
+              </span>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
